@@ -14,6 +14,7 @@
 
 #include "libkmod.h"
 #include "libkmod-internal.h"
+#include <wchar.h>
 
 /* as defined in module-init-tools */
 struct kmod_modversion32 {
@@ -32,6 +33,7 @@ enum kmod_elf_section {
 	KMOD_ELF_SECTION_STRTAB,
 	KMOD_ELF_SECTION_SYMTAB,
 	KMOD_ELF_SECTION_VERSIONS,
+	KMOD_ELF_SECTION_BUILD_ID,
 	KMOD_ELF_SECTION_MAX,
 };
 
@@ -41,6 +43,7 @@ static const char *const section_name_map[] = {
 	[KMOD_ELF_SECTION_STRTAB] = ".strtab",
 	[KMOD_ELF_SECTION_SYMTAB] = ".symtab",
 	[KMOD_ELF_SECTION_VERSIONS] = "__versions",
+	[KMOD_ELF_SECTION_BUILD_ID] = ".note.gnu.build-id",
 };
 
 struct kmod_elf {
@@ -1251,4 +1254,55 @@ int kmod_elf_get_dependency_symbols(const struct kmod_elf *elf,
 	}
 	free(visited_versions);
 	return count;
+}
+
+#ifndef NT_GNU_BUILD_ID
+#define NT_GNU_BUILD_ID 3
+#endif
+
+/*
+ * Read the .notes.gnu.build-id section that is added by the linker via --build-id. The
+ * section format follows the one defined in shared/elf-note.h, with name == "GNU\0",
+ * type == NT_GNU_BUILD_ID and desc being the hash.
+ */
+int kmod_elf_get_build_id(const struct kmod_elf *elf, const void **hash, size_t *hash_len)
+{
+	uint64_t off, size;
+	uint32_t namesz, descsz, type;
+	const char *name;
+
+	*hash = NULL;
+	*hash_len = 0;
+
+	off = elf->sections[KMOD_ELF_SECTION_BUILD_ID].offset;
+	size = elf->sections[KMOD_ELF_SECTION_BUILD_ID].size;
+	if (off == 0 || size == 0)
+		return -ENODATA;
+
+	if (size < 12) {
+		ELFDBG(elf, "build-id section is too small: %" PRIu64 "\n", size);
+		return -EINVAL;
+	}
+
+	namesz = elf_get_uint32(elf, off);
+	descsz = elf_get_uint32(elf, off + 4);
+	type = elf_get_uint32(elf, off + 8);
+
+	if (size < 12 + namesz + descsz) {
+		ELFDBG(elf, "build-id section is too small: %" PRIu64 "\n", size);
+		return -EINVAL;
+	}
+
+	name = elf_get_mem(elf, off + 12);
+
+	if (type != NT_GNU_BUILD_ID || namesz != 4 || memcmp(name, "GNU\0", 4)) {
+		ELFDBG(elf, "Invalid buid-id section: type %" PRIu32 ", name %.3s\n",
+		       type, name);
+		return -EINVAL;
+	}
+
+	*hash = elf_get_mem(elf, off + 16);
+	*hash_len = descsz;
+
+	return 0;
 }
