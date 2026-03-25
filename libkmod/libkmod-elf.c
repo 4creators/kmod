@@ -162,6 +162,11 @@ static uint64_t elf_get_uint(const struct kmod_elf *elf, uint64_t offset, uint16
 	return ret;
 }
 
+static inline uint32_t elf_get_uint32(const struct kmod_elf *elf, uint64_t offset)
+{
+	return elf_get_uint(elf, offset, 4);
+}
+
 static int elf_set_uint(const struct kmod_elf *elf, uint64_t offset, uint64_t size,
 			uint64_t value, uint8_t *changed)
 {
@@ -796,7 +801,8 @@ static uint64_t kmod_elf_resolve_crc(const struct kmod_elf *elf, uint64_t crc,
 		return (uint64_t)-1;
 	}
 
-	crc = elf_get_uint(elf, off + crc, sizeof(uint32_t));
+	crc = elf_get_uint32(elf, off + crc);
+
 	return crc;
 }
 
